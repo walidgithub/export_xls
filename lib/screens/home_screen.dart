@@ -399,28 +399,23 @@ class _HomeScreenState extends State<HomeScreen> {
           ..subject = readByName(row, columnIndex, [
             "subject",
             "course",
-            "المادة",
-            "الماده",
+            "الماد"
           ]).isNotEmpty
               ? readByName(row, columnIndex, ["subject", "course", "المادة"])
               : subjectController.text.trim()
           ..location = readByName(row, columnIndex, [
             "location",
             "place",
-            "المركز",
             "المكان",
-            "مركزالتصحيح",
+            "مركز",
           ]).isNotEmpty
               ? readByName(row, columnIndex, ["location", "place", "المركز"])
               : location
           ..shift = readByName(row, columnIndex, [
             "shift",
             "period",
-            "الفترة",
             "الوردية",
-            "الفتره",
-            "فترة التصحيح",
-            "فتره التصحيح",
+            "فتر",
           ]).isNotEmpty
               ? readByName(row, columnIndex, ["shift", "period", "الفترة"])
               : shift
