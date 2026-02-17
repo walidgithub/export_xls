@@ -41,6 +41,7 @@ dev_dependencies:
     sdk: flutter
   file_picker: ^10.3.10
   excel: ^4.0.6
+  archive: ^3.6.1
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is
   # activated in the `analysis_options.yaml` file located at the root of your

@@ -23,6 +23,7 @@ class MarkersTable extends StatelessWidget {
         MaterialStateProperty.all(Colors.grey.shade200),
         columns: const [
           DataColumn(label: Text('User ID')),
+          DataColumn(label: Text('Password')),
           DataColumn(label: Text('Marker Name')),
           DataColumn(label: Text('File #')),
           DataColumn(label: Text('Role')),
@@ -36,6 +37,7 @@ class MarkersTable extends StatelessWidget {
           return DataRow(
             cells: [
               DataCell(Text(row.userId)),
+              DataCell(Text(row.password)),
               DataCell(Text(row.markerName)),
               DataCell(Text(row.fileNumber)),
               DataCell(Text(row.role)),

@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import '../models/marker_row.dart';
 import '../widgets/dropdown_location.dart';
 import '../widgets/dropdown_shift.dart';
+import '../widgets/excel_fixer.dart';
 import '../widgets/file_picker_widget.dart';
+import '../widgets/merge_files_widget.dart';
 import '../widgets/subject_input.dart';
 import '../widgets/markers_table.dart';
 import 'package:excel/excel.dart' as excel_pkg;
@@ -23,45 +25,48 @@ class _HomeScreenState extends State<HomeScreen> {
   bool loading = false;
   String? fileName;
   bool hasFile = false;
+  bool _isCancelled = false;
 
   final ScrollController _verticalController = ScrollController();
   final ScrollController _horizontalController = ScrollController();
 
   String locationCode(String location) {
     switch (location.toLowerCase()) {
-      case 'sohar':
-        return 's';
-      case 'muscat':
-        return 'm';
-      case 'nizwa':
-        return 'n';
-      case 'ibri':
-        return 'i';
-      case 'rostaq':
-        return 'r';
-      default:
-        return 'x';
+      case 'sohar':   return 's';
+      case 'muscat':  return 'm';
+      case 'nizwa':   return 'n';
+      case 'ibri':    return 'i';
+      case 'rostaq':  return 'r';
+      default:        return 'x';
     }
   }
 
-  String shiftCode(String shift) {
-    return shift.toLowerCase() == 'morning' ? '1' : '2';
-  }
+  String shiftCode(String shift) => shift.toLowerCase() == 'morning' ? '1' : '2';
 
   String roleCode(String role) {
     final r = role.toLowerCase();
-    if (r.contains('chief')) return 'c';
+    if (r.contains('chief'))   return 'c';
     if (r.contains('assistant')) return 'a';
-    if (r.contains('group')) return 'g';
-    return 'm';
+    if (r.contains('group'))   return 'g';
+    if (r.contains('marke'))   return 'm';
+    return '';
+  }
+
+  void _stopReading() {
+    setState(() {
+      _isCancelled = true;
+      loading = false;
+      hasFile = false;
+      rows.clear();
+      fileName = '';
+    });
   }
 
   void generateUserIds() {
-
     if (subjectController.text.trim() == "") {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('يرجى إدخال كود المادة أولاً'),
+          content: Text('Please insert subject code'),
           backgroundColor: Colors.red,
           duration: Duration(seconds: 2),
         ),
@@ -72,68 +77,52 @@ class _HomeScreenState extends State<HomeScreen> {
     int chiefCount = 1;
     int assistantCount = 1;
     int groupCount = 0;
-
     int markerCount = 0;
-    String firstFileNumber = ''; // 👈 أول رقم في عمود File #
+    String firstFileNumber = '';
     String currentGroupCode = '';
-    String currentGroupFileRef = ''; // رقم ملف Group Leader الحالي
+    String currentGroupFileRef = '';
 
     final subject = subjectController.text.trim().toLowerCase();
     final locCode = locationCode(location);
     final shCode = shiftCode(shift);
 
-    // 👇 حفظ أول رقم ملف قبل بداية الـ loop
-    if (rows.isNotEmpty) {
-      firstFileNumber = rows.first.fileNumber;
-    }
+    if (rows.isNotEmpty) firstFileNumber = rows.first.fileNumber;
 
     for (final row in rows) {
       final rCode = roleCode(row.role);
 
-      // ===== CHIEF MARKER =====
       if (rCode == 'c') {
         final counter = chiefCount.toString().padLeft(2, '0');
-        row.userId = '$subject$locCode$shCode' 'c$counter';
-
+        row.userId = '$subject${locCode}${shCode}c$counter';
         row.fileRef = '';
-
         chiefCount++;
         continue;
       }
 
-      // ===== ASSISTANT =====
       if (rCode == 'a') {
         final counter = assistantCount.toString().padLeft(2, '0');
-        row.userId = '$subject$locCode$shCode' 'a$counter';
-
-        row.fileRef = firstFileNumber; // 👈 Assistant يأخذ أول رقم
+        row.userId = '$subject${locCode}${shCode}a$counter';
+        row.fileRef = firstFileNumber;
         assistantCount++;
         continue;
       }
 
-      // ===== GROUP LEADER =====
       if (rCode == 'g') {
         groupCount++;
         markerCount = 0;
-
         currentGroupCode = groupCount.toString().padLeft(2, '0');
-        currentGroupFileRef = row.fileNumber; // حفظ رقم ملف Group Leader نفسه
-
-        row.userId = '$subject$locCode$shCode' 'g$currentGroupCode';
-
-        row.fileRef = firstFileNumber; // 👈 Group Leader يأخذ أول رقم (السهم الأخضر)
-
+        currentGroupFileRef = row.fileNumber;
+        row.userId = '$subject${locCode}${shCode}g$currentGroupCode';
+        row.fileRef = firstFileNumber;
         continue;
       }
 
-      // ===== MARKER =====
+      if (rCode == '') continue;
+
       markerCount++;
-
       final markerSeq = markerCount.toString().padLeft(2, '0');
-
-      row.userId = '$subject$locCode$shCode' 'm$currentGroupCode$markerSeq';
-
-      row.fileRef = currentGroupFileRef; // 👈 Marker يأخذ رقم Group Leader (السهم البني)
+      row.userId = '$subject${locCode}${shCode}m$currentGroupCode$markerSeq';
+      row.fileRef = currentGroupFileRef;
     }
 
     setState(() {});
@@ -141,74 +130,55 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> exportToExcel() async {
     try {
-      var excel = excel_pkg.Excel.createExcel();
-      excel_pkg.Sheet sheetObject = excel['Sheet1'];
+      final excel = excel_pkg.Excel.createExcel();
+      final sheet = excel['Sheet1'];
 
-      // إضافة الـ Headers
-      sheetObject.appendRow([
-        excel_pkg.TextCellValue('User ID'),
-        excel_pkg.TextCellValue('Marker Name'),
-        excel_pkg.TextCellValue('File #'),
-        excel_pkg.TextCellValue('Role'),
-        excel_pkg.TextCellValue('File Ref'),
-        excel_pkg.TextCellValue('Subject'),
-        excel_pkg.TextCellValue('Shift'),
-        excel_pkg.TextCellValue('Location'),
-        excel_pkg.TextCellValue('Gender'),
-      ]);
+      final headerStyle = excel_pkg.CellStyle(
+        bold: true,
+        fontSize: 12,
+        horizontalAlign: excel_pkg.HorizontalAlign.Center,
+        verticalAlign: excel_pkg.VerticalAlign.Center,
+        backgroundColorHex: excel_pkg.ExcelColor.fromHexString('E3F2FD'),
+      );
 
-      // إضافة البيانات
-      for (var row in rows) {
-        sheetObject.appendRow([
-          excel_pkg.TextCellValue(row.userId ?? ''),
-          excel_pkg.TextCellValue(row.markerName ?? ''),
-          excel_pkg.TextCellValue(row.fileNumber ?? ''),
-          excel_pkg.TextCellValue(row.role ?? ''),
-          excel_pkg.TextCellValue(row.fileRef ?? ''),
-          excel_pkg.TextCellValue(subjectController.text.trim()),
-          excel_pkg.TextCellValue(shift ?? ''),
-          excel_pkg.TextCellValue(location ?? ''),
-          excel_pkg.TextCellValue(row.gender ?? ''),
-        ]);
+      final dataStyle = excel_pkg.CellStyle(
+        fontSize: 11,
+        horizontalAlign: excel_pkg.HorizontalAlign.Center,
+        verticalAlign: excel_pkg.VerticalAlign.Center,
+      );
+
+      final headers = ['User ID','Password','Marker Name','File #','Role','File Ref','Subject','Shift','Location','Gender'];
+      sheet.appendRow(headers.map((e) => excel_pkg.TextCellValue(e)).toList());
+
+      for (int i = 0; i < headers.length; i++) {
+        sheet.cell(excel_pkg.CellIndex.indexByColumnRow(columnIndex: i, rowIndex: 0)).cellStyle = headerStyle;
+        sheet.setColumnWidth(i, 18);
       }
 
-      // تحويل الـ Excel إلى bytes
-      var fileBytes = excel.encode();
+      for (int r = 0; r < rows.length; r++) {
+        final row = rows[r];
+        final values = [row.userId ?? '', row.password ?? '', row.markerName ?? '', row.fileNumber ?? '', row.role ?? '', row.fileRef ?? '', row.subject ?? '', shift, location, row.gender ?? ''];
+        sheet.appendRow(values.map((e) => excel_pkg.TextCellValue(e)).toList());
+        for (int c = 0; c < values.length; c++) {
+          sheet.cell(excel_pkg.CellIndex.indexByColumnRow(columnIndex: c, rowIndex: r + 1)).cellStyle = dataStyle;
+        }
+      }
 
+      final fileBytes = excel.encode();
       if (fileBytes != null) {
-        // إنشاء Blob من الـ bytes
         final blob = html.Blob([fileBytes], 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-
-        // إنشاء رابط تحميل
         final url = html.Url.createObjectUrlFromBlob(blob);
-        final anchor = html.AnchorElement(href: url)
-          ..setAttribute('download', 'markers_${DateTime.now().millisecondsSinceEpoch}.xlsx')
+        html.AnchorElement(href: url)
+          ..setAttribute('download', 'markers_${location}_${shift}_${subjectController.text.trim()}.xlsx')
           ..click();
-
-        // تنظيف الـ URL
         html.Url.revokeObjectUrl(url);
-
-        // عرض رسالة نجاح
         if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('تم تحميل الملف بنجاح'),
-              backgroundColor: Colors.green,
-              duration: Duration(seconds: 2),
-            ),
-          );
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('File Successfully Downloaded'), backgroundColor: Colors.green));
         }
       }
     } catch (e) {
-      // عرض رسالة خطأ
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('حدث خطأ: $e'),
-            backgroundColor: Colors.red,
-            duration: const Duration(seconds: 3),
-          ),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
       }
     }
   }
@@ -221,222 +191,225 @@ class _HomeScreenState extends State<HomeScreen> {
     super.dispose();
   }
 
-  Future<void> readExcel(Uint8List bytes, String name) async {
-    // 🛑 Guard مهم جدًا
-    if (bytes.isEmpty) return;
+  Stream<List<Map<String, String>>> _parseExcelStream(Uint8List bytes) async* {
+    // ─── Step 1: yield so the UI renders the stop button BEFORE any blocking work ───
+    await Future.delayed(const Duration(milliseconds: 200));
+    if (_isCancelled) return;
 
-    setState(() {
-      loading = true;
-      hasFile = true;
-      rows.clear();
-    });
+    // ─── Step 2: fix bytes (sync + heavy) ───
+    final fixedBytes = ExcelFixer.fixExcelBytes(bytes);
+    await Future.delayed(Duration.zero); // yield between heavy calls
+    if (_isCancelled) return;
 
-    await Future.delayed(const Duration(milliseconds: 100)); // UX + تأكيد repaint
+    // ─── Step 3: decode (sync + heavy) ───
+    final excel = excel_pkg.Excel.decodeBytes(fixedBytes);
+    await Future.delayed(Duration.zero); // yield before processing
+    if (_isCancelled) return;
 
-    final excel = excel_pkg.Excel.decodeBytes(bytes);
     final sheet = excel.tables[excel.tables.keys.first]!;
 
+    // ─── helpers ───
     String normalize(String text) {
       return text
           .toLowerCase()
-          .replaceAll(RegExp(r"[^\w]"), '')
-          .trim();
+          .replaceAll(' ', '').replaceAll('-', '').replaceAll('_', '')
+          .replaceAll('.', '').replaceAll(',', '').replaceAll(':', '')
+          .replaceAll(';', '').replaceAll('،', '').replaceAll('؛', '')
+          .replaceAll('(', '').replaceAll(')', '').replaceAll('[', '')
+          .replaceAll(']', '').replaceAll("'", '').replaceAll('"', '')
+          .replaceAll('#', '').trim();
     }
 
-    // 👇 البحث عن صف الـ Headers (تخطي الصفوف الفارغة والعناوين)
+    String translateRole(String role) {
+      final trimmedRole = role.trim();
+      final lowerRole = trimmedRole.toLowerCase();
+      if (lowerRole.contains('chief marker') || lowerRole.contains('assistant') ||
+          lowerRole.contains('group leader') ||
+          (lowerRole.contains('marker') && !lowerRole.contains('رئيس') &&
+              !lowerRole.contains('مساعد') && !lowerRole.contains('مجموعة') &&
+              !lowerRole.contains('مشرف'))) {
+        String cleaned = trimmedRole
+            .replaceAll(RegExp(r'رئيس قاعات التصحيح'), '')
+            .replaceAll(RegExp(r'مساعد الرئيس'), '')
+            .replaceAll(RegExp(r'رئيس مجموعة\d*'), '')
+            .replaceAll(RegExp(r'مشرف المجموعة'), '')
+            .replaceAll(RegExp(r'مصحح\d*'), '').trim();
+        return cleaned.isNotEmpty ? cleaned : trimmedRole;
+      }
+      if (lowerRole.contains('رئيس قاعات') || lowerRole.contains('رئيس القاعات')) return 'Chief Marker';
+      if (lowerRole.contains('مساعد الرئيس') || lowerRole.contains('مساعدالرئيس')) return 'Assistant Chief Marker';
+      if (lowerRole.contains('رئيس مجموعة') || lowerRole.contains('رئيسمجموعة') ||
+          lowerRole.contains('مشرف المجموعة') || lowerRole.contains('مشرفالمجموعة')) {
+        final match = RegExp(r'\d+').firstMatch(role);
+        return match != null ? 'Group Leader${match.group(0)}' : 'Group Leader';
+      }
+      if (lowerRole.contains('مصحح')) {
+        final match = RegExp(r'\d+').firstMatch(role);
+        return match != null ? 'Marker${match.group(0)}' : 'Marker';
+      }
+      return trimmedRole;
+    }
+
+    String getCellValue(excel_pkg.Data? cell) {
+      if (cell == null) return '';
+      final value = cell.value;
+      if (value == null) return '';
+      final valueStr = value.toString().trim();
+      if (valueStr.contains('!') && valueStr.contains('\$')) return '';
+      return valueStr;
+    }
+
+    // ─── find header row ───
     int headerRowIndex = -1;
     List<excel_pkg.Data?>? headerRow;
-
     for (int i = 0; i < sheet.rows.length; i++) {
-      final row = sheet.rows[i];
-
-      // التحقق من وجود أعمدة في الصف
-      bool hasValidColumns = false;
-      for (var cell in row) {
-        final cellValue = cell?.value?.toString().trim() ?? '';
-        if (cellValue.isNotEmpty) {
-          // 👇 استخدام toLowerCase بدلاً من normalize للحفاظ على النص العربي
-          final lowerCase = cellValue.toLowerCase();
-
-          if (lowerCase.contains('marker') ||
-              lowerCase.contains('file') ||
-              lowerCase.contains('role') ||
-              lowerCase.contains('رقم') ||
-              lowerCase.contains('ملف') ||
-              lowerCase.contains('اسم') ||
-              lowerCase.contains('إسم') ||
-              lowerCase.contains('مصحح') ||
-              lowerCase.contains('وظيف') ||
-              lowerCase.contains('مهم')) {
-            hasValidColumns = true;
-            break;
-          }
+      for (var cell in sheet.rows[i]) {
+        final v = cell?.value?.toString().trim().toLowerCase() ?? '';
+        if (v.contains('marker') || v.contains('name') || v.contains('file') ||
+            v.contains('role') || v.contains('position') || v.contains('رقم') ||
+            v.contains('ملف') || v.contains('اسم') || v.contains('إسم') ||
+            v.contains('مهم') || v.contains('وظيف') || v.contains('قاع')) {
+          headerRowIndex = i;
+          headerRow = sheet.rows[i];
+          break;
         }
       }
-
-      if (hasValidColumns) {
-        headerRowIndex = i;
-        headerRow = row;
-        break;
-      }
+      if (headerRowIndex != -1) break;
     }
+    if (headerRowIndex == -1 || headerRow == null) return;
 
-    // 👇 إذا لم يتم العثور على Headers
-    if (headerRowIndex == -1 || headerRow == null) {
-      setState(() {
-        loading = false;
-      });
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('لم يتم العثور على أعمدة صحيحة في الملف'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-      return;
-    }
-
-    // 👇 بناء خريطة الأعمدة
+    // ─── build column index ───
     final Map<String, int> columnIndex = {};
-
     for (int i = 0; i < headerRow.length; i++) {
-      final cellValue = headerRow[i]?.value?.toString();
-      if (cellValue != null && cellValue.trim().isNotEmpty) {
-        columnIndex[normalize(cellValue)] = i;
-      }
+      final v = headerRow[i]?.value?.toString();
+      if (v != null && v.trim().isNotEmpty) columnIndex[normalize(v)] = i;
     }
 
-    // 👇 دالة القراءة بالاسم
-    String readByName(
-        List<excel_pkg.Data?> row,
-        Map<String, int> map,
-        List<String> possibleNames,
-        ) {
-      for (final key in possibleNames) {
+    String readByName(List<excel_pkg.Data?> row, List<String> keys) {
+      for (final key in keys) {
         final normalized = normalize(key);
-        if (map.containsKey(normalized)) {
-          final index = map[normalized]!;
-          if (index < row.length) {
-            return row[index]?.value?.toString().trim() ?? '';
+        if (columnIndex.containsKey(normalized)) {
+          final idx = columnIndex[normalized]!;
+          if (idx < row.length) {
+            final v = getCellValue(row[idx]);
+            if (v.isNotEmpty) return v;
+          }
+        }
+        for (final entry in columnIndex.entries) {
+          if (entry.key.contains(normalized)) {
+            final idx = entry.value;
+            if (idx < row.length) {
+              final v = getCellValue(row[idx]);
+              if (v.isNotEmpty) return v;
+            }
           }
         }
       }
       return '';
     }
 
-    // 👇 قراءة البيانات (تخطي الصفوف قبل الـ Headers والصفوف الفارغة)
+    // ─── yield rows in batches ───
+    const batchSize = 10;
+    final batch = <Map<String, String>>[];
+
     for (var i = headerRowIndex + 1; i < sheet.rows.length; i++) {
+      if (_isCancelled) return;
+
       final row = sheet.rows[i];
+      final markerName = readByName(row, ["markersname","markersnameالاسم","markername","name","الإسم","الاسم","اسمالمصحح","إسمالمصحح","اسم","إسم"]);
+      final fileNumber = readByName(row, ["fileرقمالملف","file","filenumber","رقمالملف","ملف","الملف"]);
+      final roleRaw    = readByName(row, ["roleالمهمة","role","position","المهمة","المهمه","الوظيفة","الوظيفه","مهمة","مهمه"]);
+      final role       = translateRole(roleRaw);
 
-      // 👇 قراءة البيانات الأساسية
-      final markerName = readByName(row, columnIndex, [
-        "marker name",
-        "marker's name",
-        "markername",
-        "name",
-        "اسم المصحح",
-        "إسم المصحح",
-        "الاسم",
-        "الأسم",
-        "الإسم",
-      ]);
+      if (markerName.isEmpty || fileNumber.isEmpty || role.isEmpty) continue;
+      if (RegExp(r'^\d+$').hasMatch(markerName) && RegExp(r'^\d+$').hasMatch(fileNumber)) continue;
 
-      final fileNumber = readByName(row, columnIndex, [
-        "file",
-        "file number",
-        "file#",
-        "filenumber",
-        "رقم الملف",
-        "ملف",
-        "الملف",
-      ]);
+      batch.add({
+        'markerName': markerName,
+        'fileNumber': fileNumber,
+        'role':       role,
+        'gender':     readByName(row, ["genderالجنس","gender","sex","الجنس","النوع","جنس"]),
+        'subject':    readByName(row, ["subjectالمادة","subject","course","المادة","الماده","مادة","ماده"]),
+        'location':   readByName(row, ["locationالمركز","location","place","المركز","المكان","مركزالتصحيح","مركز","مكان"]),
+        'shift':      readByName(row, ["shiftالفترة","shift","period","فترةالتصحيح","الفترة","الفتره","الوردية","فترة","فتره"]),
+      });
 
-      final role = readByName(row, columnIndex, [
-        "role",
-        "position",
-        "الوظيفة",
-        "الوظيفه",
-        "المهمة",
-        "المهمه",
-      ]);
-
-      // 👇 تخطي الصف إذا كانت البيانات الأساسية فارغة
-      if (markerName.isEmpty || fileNumber.isEmpty || role.isEmpty) {
-        continue;
+      if (batch.length >= batchSize) {
+        yield List.of(batch);
+        batch.clear();
+        await Future.delayed(Duration.zero); // 👈 give Flutter a frame
       }
+    }
 
-      // 👇 تخطي الصف إذا كان يحتوي على أرقام فقط (1, 2, 3...)
-      if (RegExp(r'^\d+$').hasMatch(markerName) &&
-          RegExp(r'^\d+$').hasMatch(fileNumber)) {
-        continue;
-      }
+    if (batch.isNotEmpty) yield batch;
+  }
 
-      // 👇 التحقق من أن الصف ليس فارغاً تماماً
-      bool isEmptyRow = true;
-      for (var cell in row) {
-        if (cell?.value?.toString().trim().isNotEmpty ?? false) {
-          isEmptyRow = false;
-          break;
+  Future<void> readExcel(Uint8List bytes, String name) async {
+    if (bytes.isEmpty) return;
+
+    _isCancelled = false;
+
+    // ─── render loading + stop button FIRST before any work ───
+    setState(() {
+      loading = true;
+      hasFile = true;
+      rows.clear();
+    });
+
+    // Wait 2 frames so Flutter fully renders the stop button
+    await Future.delayed(const Duration(milliseconds: 100));
+    await Future.delayed(Duration.zero);
+
+    try {
+      await for (final batch in _parseExcelStream(bytes)) {
+        if (_isCancelled) return;
+
+        for (final data in batch) {
+          rows.add(
+            MarkerRow(
+              markerName: data['markerName']!,
+              fileNumber: data['fileNumber']!,
+              role:       data['role']!,
+              gender:     data['gender']!,
+            )
+              ..subject  = data['subject']!.isNotEmpty  ? data['subject']!  : subjectController.text.trim()
+              ..location = data['location']!.isNotEmpty ? data['location']! : location
+              ..shift    = data['shift']!.isNotEmpty    ? data['shift']!    : shift
+              ..password = 'moe.1234'
+              ..userId   = ''
+              ..fileRef  = '',
+          );
         }
       }
 
-      if (isEmptyRow) continue;
+      if (_isCancelled) return;
 
-      // 👇 إضافة الصف
-      rows.add(
-        MarkerRow(
-          markerName: markerName,
-          fileNumber: fileNumber,
-          role: role,
-          gender: readByName(row, columnIndex, [
-            "gender",
-            "sex",
-            "النوع",
-            "الجنس",
-          ]),
-        )
-          ..subject = readByName(row, columnIndex, [
-            "subject",
-            "course",
-            "الماد"
-          ]).isNotEmpty
-              ? readByName(row, columnIndex, ["subject", "course", "المادة"])
-              : subjectController.text.trim()
-          ..location = readByName(row, columnIndex, [
-            "location",
-            "place",
-            "المكان",
-            "مركز",
-          ]).isNotEmpty
-              ? readByName(row, columnIndex, ["location", "place", "المركز"])
-              : location
-          ..shift = readByName(row, columnIndex, [
-            "shift",
-            "period",
-            "الوردية",
-            "فتر",
-          ]).isNotEmpty
-              ? readByName(row, columnIndex, ["shift", "period", "الفترة"])
-              : shift
-          ..userId = ''
-          ..fileRef = '',
-      );
-    }
+      if (rows.isEmpty && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('There are no correct columns or data'), backgroundColor: Colors.orange),
+        );
+      }
 
-    setState(() {
-      fileName = name;
-      loading = false;
-    });
+      setState(() {
+        fileName = name;
+        loading  = false;
+      });
 
-    // 👇 رسالة إذا لم يتم إضافة أي صفوف
-    if (rows.isEmpty && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('لم يتم العثور على بيانات صالحة في الملف'),
-          backgroundColor: Colors.orange,
-        ),
-      );
+    } catch (e) {
+      if (_isCancelled) return;
+      setState(() {
+        loading = false;
+        hasFile = false;
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('خطأ في قراءة الملف\nError: ${e.toString()}'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
     }
   }
 
@@ -450,63 +423,79 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Markers Generator'),
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: loading ? _stopReading : null,
+        backgroundColor: loading ? Colors.red : Colors.grey,
+        icon: const Icon(Icons.stop_rounded, color: Colors.white),
+        label: const Text(
+          'Stop',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        ),
       ),
+      appBar: AppBar(title: const Text('Markers Generator')),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            /// ==== CONTROLS ====
+            Card(
+              elevation: 3,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(Icons.info_outline, color: Colors.blueAccent, size: 26),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: RichText(
+                        text: TextSpan(
+                          style: const TextStyle(color: Colors.black87, fontSize: 14, height: 1.4),
+                          children: [
+                            const TextSpan(text: 'Important Notice\n', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+                            const TextSpan(text: 'Please before selecting excel file → create a new empty Excel file, then copy data from the old file using '),
+                            const TextSpan(text: 'Paste Values only ', style: TextStyle(fontWeight: FontWeight.w600)),
+                            const TextSpan(text: '(Ctrl + C → Ctrl + Alt + V → Values).'),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 20),
+
             Row(
               children: [
-                Expanded(
-                  child: DropdownLocation(
-                    value: location,
-                    onChanged: (v) => setState(() => location = v),
-                  ),
-                ),
+                Expanded(child: DropdownLocation(value: location, onChanged: (v) => setState(() => location = v))),
                 const SizedBox(width: 12),
-                Expanded(
-                  child: DropdownShift(
-                    value: shift,
-                    onChanged: (v) => setState(() => shift = v),
-                  ),
-                ),
+                Expanded(child: DropdownShift(value: shift, onChanged: (v) => setState(() => shift = v))),
                 const SizedBox(width: 12),
-                Expanded(
-                  child: SubjectInput(controller: subjectController),
-                ),
+                Expanded(child: SubjectInput(controller: subjectController)),
               ],
             ),
 
             const SizedBox(height: 16),
 
-            FilePickerWidget(
-              onFileLoaded: (bytes, name) => readExcel(bytes, name),
-            ),
-
+            FilePickerWidget(onFileLoaded: (bytes, name) => readExcel(bytes, name)),
 
             if (fileName != null) ...[
               const SizedBox(height: 8),
-              Text(
-                'Loaded file: $fileName',
-                style: const TextStyle(color: Colors.green),
-              ),
+              Text('Loaded file: $fileName', style: const TextStyle(color: Colors.green)),
             ],
 
             const SizedBox(height: 12),
 
-            /// ==== LOADING INDICATOR ====
             if (hasFile && loading)
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 8),
                 child: LinearProgressIndicator(),
               ),
 
-
-            /// ==== TABLE ====
             Expanded(
               child: Container(
                 width: double.infinity,
@@ -533,20 +522,58 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
 
-
             const SizedBox(height: 12),
 
-            /// ==== ACTION BUTTONS ====
             Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                ElevatedButton(
-                  onPressed: rows.isEmpty ? null : generateUserIds,
-                  child: const Text('Generate User IDs and File Ref'),
+                Row(
+                  children: [
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 40),
+                        backgroundColor: Colors.blue,
+                        foregroundColor: Colors.white,
+                        elevation: 8,
+                        shadowColor: Colors.blue.withOpacity(0.5),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        disabledBackgroundColor: Colors.grey[300],
+                        disabledForegroundColor: Colors.grey[500],
+                      ),
+                      onPressed: rows.isEmpty ? null : generateUserIds,
+                      child: const Text('Generate User IDs and File Ref'),
+                    ),
+                    const SizedBox(width: 12),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 40),
+                        backgroundColor: Colors.blue,
+                        foregroundColor: Colors.white,
+                        elevation: 8,
+                        shadowColor: Colors.blue.withOpacity(0.5),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        disabledBackgroundColor: Colors.grey[300],
+                        disabledForegroundColor: Colors.grey[500],
+                      ),
+                      onPressed: rows.isEmpty ? null : exportToExcel,
+                      child: const Text('Export Excel'),
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 12),
-                ElevatedButton(
-                  onPressed: rows.isEmpty ? null : exportToExcel,
-                  child: const Text('Export Excel'),
+                ExcelMergerAltWidget(
+                  buttonText: 'START MERGING',
+                  buttonColor: Colors.green[700],
+                  outputFileName: 'merged_markers_${location}_${subjectController.text.trim()}.xlsx',
+                  onSuccess: () {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Merging done'), backgroundColor: Colors.green, duration: Duration(seconds: 2)),
+                    );
+                  },
+                  onError: (error) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Error in merging'), backgroundColor: Colors.red, duration: Duration(seconds: 2)),
+                    );
+                  },
                 ),
               ],
             ),

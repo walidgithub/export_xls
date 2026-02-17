@@ -1,5 +1,6 @@
 class MarkerRow {
   String userId = '';
+  String password = '';
   String markerName;
   String fileNumber;
   String role;
